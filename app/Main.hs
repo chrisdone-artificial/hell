@@ -1,4 +1,4 @@
-{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE ExistentialQuantification, StandaloneDeriving #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 
@@ -24,6 +24,7 @@ data UTerm
   | UPure UTerm
   | UBind UTerm UTerm
   | UPrim Prim
+  deriving Show
 
 --------------------------------------------------------------------------------
 -- Untyped type
@@ -34,6 +35,7 @@ data UType
   | UIo UType
   | UString
   | UUnit
+  deriving Show
 
 --------------------------------------------------------------------------------
 -- Primitive functions
@@ -44,12 +46,15 @@ data Prim
   | PString String
   | PBool Bool
   | PUnit
+  | PutStrLn
+  deriving Show
 
 tcPrim :: Prim -> Typed (Term g)
 tcPrim PUnit = Typed UnitTy (Prim ())
 tcPrim (PString string) = Typed String (Prim string)
 tcPrim (PBool bool) = Typed Bool (Prim bool)
 tcPrim DoesFileExist = Typed (Arr String (Io Bool)) (Prim doesFileExist)
+tcPrim PutStrLn = Typed (Arr String (Io UnitTy)) (Prim putStrLn)
 tcPrim WriteFile = Typed (Arr String (Arr String (Io UnitTy))) (Prim writeFile)
 
 --------------------------------------------------------------------------------
@@ -208,8 +213,8 @@ lookp (SVar v) (env, x) = lookp v env
 --------------------------------------------------------------------------------
 -- Top-level entry point
 
-main :: IO ()
-main =
+main' :: IO ()
+main' =
   ( case check test Nil of
       Typed t ex ->
         case t of
@@ -240,31 +245,33 @@ test =
         )
     )
 
--- main :: IO ()
--- main = do
---   (filePath:_) <- getArgs
---   string <- readFile filePath
---   case HSE.parseModule string >>= parseModule of
---     HSE.ParseOk binds ->
---       case lookup "main" binds of
---         Nothing -> error "No main declaration!"
---         Just expr -> Hell.reify $ Hell.eval expr
-
--- parseModule :: Show a => HSE.Module a -> HSE.ParseResult [(String, Term () (IO ()))]
--- parseModule (HSE.Module _ Nothing [] [] decls) =
---   traverse parseDecl decls
---   where parseDecl (HSE.PatBind _ (HSE.PVar _ (HSE.Ident _ string)) (HSE.UnGuardedRhs _ exp') Nothing) =
---           do e <- parseE exp'
---              pure (string, e)
---         parseE (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ string))) =
---           pure $ Hell.prim string
---         parseE (HSE.App _ f x) = do
---           Hell.A <$> parseE f <*> parseE x
---         parseE (HSE.Lit _ (HSE.String _ string _original)) =
---           pure $ Hell.T string
---         parseE (HSE.Do _ stmts) = do
---           stmts' <- traverse parseStmt stmts
---           pure $ foldr (\m f -> Hell.A (Hell.A then' m) f) (Hell.reflect (pure () :: IO ())) stmts'
---         parseE (HSE.List _ xs) = Hell.reflect <$> traverse parseE xs
---         parseE expr' = error $ "Can't parse " ++ show expr'
---         parseStmt (HSE.Qualifier _ e) = parseE e
+main :: IO ()
+main = do
+  (filePath:_) <- getArgs
+  string <- readFile filePath
+  print $ HSE.parseExp string
+  case HSE.parseExp string >>= parseE of
+    HSE.ParseOk term -> do
+     print term
+     case check term Nil of
+      Typed t ex -> do
+        case t of
+          Io UnitTy -> eval () ex
+          _ -> error $ "Wrong return type, main must be: IO ()\nGot: " ++ showType t
+  where
+        parseE (HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Prim") (HSE.Ident _ string))) =
+          pure $ UPrim $ case string of
+            "doesFileExist" -> DoesFileExist
+            "writeFile" -> WriteFile
+            "putStrLn" -> PutStrLn
+        parseE (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ string))) =
+          pure $ UVar string
+        parseE (HSE.App _ f x) = do
+          UApp <$> parseE f <*> parseE x
+        parseE (HSE.Lit _ (HSE.String _ string _original)) =
+          pure $ UPrim $ PString string
+        parseE (HSE.Do _ stmts) = do
+          stmts' <- traverse parseStmt stmts
+          pure $ foldr (\m f -> UBind m (ULam "_" UUnit f)) (UPure $ UPrim PUnit) stmts'
+        parseE expr' = error $ "Can't parse " ++ show expr'
+        parseStmt (HSE.Qualifier _ e) = parseE e
