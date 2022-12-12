@@ -42,15 +42,14 @@ data Prim
   | WriteFile
   | PString String
   | PBool Bool
+  | PUnit
 
 tcPrim :: Prim -> Typed (Term g)
+tcPrim PUnit = Typed UnitTy (Prim ())
 tcPrim (PString string) = Typed String (Prim string)
 tcPrim (PBool bool) = Typed Bool (Prim bool)
 tcPrim DoesFileExist = Typed (Arr String (Io Bool)) (Prim doesFileExist)
-tcPrim WriteFile =
-  Typed
-    (Arr String (Arr String (Io Bool)))
-    (Prim (\fp str -> True <$ writeFile fp str))
+tcPrim WriteFile = Typed (Arr String (Arr String (Io UnitTy))) (Prim writeFile)
 
 --------------------------------------------------------------------------------
 -- Typed type
@@ -60,9 +59,12 @@ data Ty t where
   String :: Ty String
   Arr :: Ty a -> Ty b -> Ty (a -> b)
   Io :: Ty a -> Ty (IO a)
+  UnitTy :: Ty ()
 
 showType :: Ty a -> String
 showType Bool = "Bool"
+showType String = "String"
+showType UnitTy = "()"
 showType (Arr t1 t2) = "(" ++ showType t1 ++ ") -> (" ++ showType t2 ++ ")"
 showType (Io a) = "(IO " ++ showType a ++ ")"
 
@@ -123,6 +125,7 @@ lookupVar v (Cons s ty e)
 
 cmpTy :: Ty a -> Ty b -> Maybe (Equal a b)
 cmpTy Bool Bool = Just Equal
+cmpTy UnitTy UnitTy = Just Equal
 cmpTy String String = Just Equal
 cmpTy (Io a1) (Io b1) =
   do
