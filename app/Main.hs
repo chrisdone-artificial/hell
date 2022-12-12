@@ -259,6 +259,7 @@ main = do
           Io UnitTy -> eval () ex
           _ -> error $ "Wrong return type, main must be: IO ()\nGot: " ++ showType t
   where
+        parseE (HSE.If _ x y z) = UIf <$> parseE x <*> parseE y <*> parseE z
         parseE (HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Prim") (HSE.Ident _ string))) =
           pure $ UPrim $ case string of
             "doesFileExist" -> DoesFileExist
@@ -270,8 +271,16 @@ main = do
           UApp <$> parseE f <*> parseE x
         parseE (HSE.Lit _ (HSE.String _ string _original)) =
           pure $ UPrim $ PString string
-        parseE (HSE.Do _ stmts) = do
-          stmts' <- traverse parseStmt stmts
-          pure $ foldr (\m f -> UBind m (ULam "_" UUnit f)) (UPure $ UPrim PUnit) stmts'
+
+        -- Do-notation requires parsing types so that you can have:
+        -- do x :: String <- readFile "x.txt"
+        --
+        -- parseE (HSE.Do _ stmts) = go stmts
+        --   where go (HSE.Qualifier _ e:stmts) = do
+        --           next <- go stmts
+        --           UBind <$> parseE e <*> fmap (ULam "_" UUnit) next
+        --         go ((HSE.Generator _ (HSE.PVar _ (HSE.Ident _ string)) e):stmts) = do
+        --           next <- go stmts
+        --           UBind <$> parseE e <*> fmap (ULam string UUnit) next
+
         parseE expr' = error $ "Can't parse " ++ show expr'
-        parseStmt (HSE.Qualifier _ e) = parseE e
