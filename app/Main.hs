@@ -33,6 +33,7 @@ data UType
   | UBool
   | UIo UType
   | UString
+  | UUnit
 
 --------------------------------------------------------------------------------
 -- Primitive functions
@@ -97,6 +98,7 @@ data ExType = forall t. ExType (Ty t)
 
 tcType :: UType -> ExType
 tcType UBool = ExType Bool
+tcType UUnit = ExType UnitTy
 tcType UString = ExType String
 tcType (UIo t1) = case tcType t1 of ExType t1' -> ExType (Io t1')
 tcType (UArr t1 t2) = case tcType t1 of
@@ -136,6 +138,7 @@ cmpTy (Arr a1 a2) (Arr b1 b2) =
     Equal <- cmpTy a1 b1
     Equal <- cmpTy a2 b2
     return Equal
+cmpTy _ _ = Nothing
 
 --------------------------------------------------------------------------------
 -- Type checker
@@ -230,7 +233,7 @@ test =
                 (UApp (UApp (UPrim WriteFile) (UPrim $ PString "heller.hs")) (UPrim $ PString "output here!"))
                 ( ULam
                     "_"
-                    UBool
+                    UUnit
                     (UPure (UPrim $ PString "Wrote heller.hs"))
                 )
             )
