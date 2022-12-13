@@ -8,6 +8,7 @@
 module Main where
 
 import Data.Functor.Identity
+import Text.Read (readMaybe)
 import qualified Language.Haskell.Exts as HSE
 import System.Environment
 import Data.List
@@ -41,23 +42,23 @@ data UType
 -- Primitive functions
 
 data Prim
-  = DoesFileExist
-  | ReadFile
-  | WriteFile
-  | PString String
-  | PBool Bool
-  | PUnit
-  | PutStrLn
-  deriving Show
+  = Ident_doesFileExist
+  | Ident_readFile
+  | Ident_writeFile
+  | Ident_putStrLn
+  | Lit_String String
+  | Lit_Bool Bool
+  | Lit_Unit
+  deriving (Show, Read)
 
 tcPrim :: Prim -> Typed (Term g)
-tcPrim PUnit = Typed UnitTy (Prim ())
-tcPrim (PString string) = Typed String (Prim string)
-tcPrim (PBool bool) = Typed Bool (Prim bool)
-tcPrim DoesFileExist = Typed (Arr String (Io Bool)) (Prim doesFileExist)
-tcPrim ReadFile = Typed (Arr String (Io String)) (Prim readFile)
-tcPrim PutStrLn = Typed (Arr String (Io UnitTy)) (Prim putStrLn)
-tcPrim WriteFile = Typed (Arr String (Arr String (Io UnitTy))) (Prim writeFile)
+tcPrim Lit_Unit = Typed UnitTy (Prim ())
+tcPrim (Lit_String string) = Typed String (Prim string)
+tcPrim (Lit_Bool bool) = Typed Bool (Prim bool)
+tcPrim Ident_doesFileExist = Typed (Arr String (Io Bool)) (Prim doesFileExist)
+tcPrim Ident_readFile = Typed (Arr String (Io String)) (Prim readFile)
+tcPrim Ident_putStrLn = Typed (Arr String (Io UnitTy)) (Prim putStrLn)
+tcPrim Ident_writeFile = Typed (Arr String (Arr String (Io UnitTy))) (Prim writeFile)
 
 --------------------------------------------------------------------------------
 -- Typed type
@@ -215,38 +216,6 @@ lookp (SVar v) (env, x) = lookp v env
 --------------------------------------------------------------------------------
 -- Top-level entry point
 
-main' :: IO ()
-main' =
-  ( case check test Nil of
-      Typed t ex ->
-        case t of
-          Io String -> do
-            bool <- eval () ex
-            print bool
-          _ -> pure ()
-  )
-
-test :: UTerm
-test =
-  UBind
-    (UApp (UPrim DoesFileExist) (UPrim (PString "heller.hs")))
-    ( ULam
-        "x"
-        UBool
-        ( UIf
-            (UVar "x")
-            (UPure (UPrim (PString "File exists!")))
-            ( UBind
-                (UApp (UApp (UPrim WriteFile) (UPrim $ PString "heller.hs")) (UPrim $ PString "output here!"))
-                ( ULam
-                    "_"
-                    UUnit
-                    (UPure (UPrim $ PString "Wrote heller.hs"))
-                )
-            )
-        )
-    )
-
 main :: IO ()
 main = do
   (filePath:_) <- getArgs
@@ -264,18 +233,20 @@ main = do
           _ -> error $ "Wrong return type, main must be: IO ()\nGot: " ++ showType t
   where
         parseE (HSE.If _ x y z) = UIf <$> parseE x <*> parseE y <*> parseE z
-        parseE (HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Prim") (HSE.Ident _ string))) =
-          pure $ UPrim $ case string of
-            "doesFileExist" -> DoesFileExist
-            "writeFile" -> WriteFile
-            "putStrLn" -> PutStrLn
-            "readFile" -> ReadFile
+        parseE (HSE.Var srcLoc (HSE.Qual _ (HSE.ModuleName _ "Prim") (HSE.Ident _ string))) =
+           case readMaybe ("Ident_" ++ string) of
+            Just ident -> pure $ UPrim ident
+            Nothing -> HSE.ParseFailed (HSE.getPointLoc srcLoc) ("Unknown variable: " ++ string)
         parseE (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ string))) =
           pure $ UVar string
         parseE (HSE.App _ f x) = do
           UApp <$> parseE f <*> parseE x
         parseE (HSE.Lit _ (HSE.String _ string _original)) =
-          pure $ UPrim $ PString string
+          pure $ UPrim $ Lit_String string
+        parseE (HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Prim") (HSE.Ident _ "True"))) =
+          pure $ UPrim $ Lit_Bool True
+        parseE (HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Prim") (HSE.Ident _ "False"))) =
+          pure $ UPrim $ Lit_Bool True
         parseE (HSE.Do srcLoc stmts) = go stmts
           where go (HSE.Qualifier _ e:stmts) = do
                   if null stmts then parseE e else do
