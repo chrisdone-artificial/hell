@@ -232,7 +232,12 @@ main = do
           Io UnitTy -> eval () ex
           _ -> error $ "Wrong return type, main must be: IO ()\nGot: " ++ showType t
   where
+        parseE (HSE.App _ (HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Prim") (HSE.Ident _ "pure"))) e) =
+          UPure <$> parseE e
+        parseE (HSE.Paren _ x) = parseE x
         parseE (HSE.If _ x y z) = UIf <$> parseE x <*> parseE y <*> parseE z
+        parseE (HSE.Lambda _ [HSE.PParen _ (HSE.PatTypeSig _ (HSE.PVar _ (HSE.Ident _ string)) typ)] body) = do
+          ULam string <$> parseType typ <*> parseE body
         parseE (HSE.Var srcLoc (HSE.Qual _ (HSE.ModuleName _ "Prim") (HSE.Ident _ string))) =
            case readMaybe ("Ident_" ++ string) of
             Just ident -> pure $ UPrim ident
@@ -243,20 +248,23 @@ main = do
           UApp <$> parseE f <*> parseE x
         parseE (HSE.Lit _ (HSE.String _ string _original)) =
           pure $ UPrim $ Lit_String string
-        parseE (HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Prim") (HSE.Ident _ "True"))) =
+        parseE (HSE.Con _ (HSE.Qual _ (HSE.ModuleName _ "Prim") (HSE.Ident _ "True"))) =
           pure $ UPrim $ Lit_Bool True
-        parseE (HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Prim") (HSE.Ident _ "False"))) =
+        parseE (HSE.Con _ (HSE.Qual _ (HSE.ModuleName _ "Prim") (HSE.Ident _ "False"))) =
           pure $ UPrim $ Lit_Bool True
         parseE (HSE.Do srcLoc stmts) = go stmts
           where go (HSE.Qualifier _ e:stmts) = do
                   if null stmts then parseE e else do
                     next <- go stmts
                     UBind <$> parseE e <*> pure (ULam "_" UUnit next)
-                go (HSE.Generator _ (HSE.PatTypeSig _ (HSE.PVar _ (HSE.Ident _ string)) (HSE.TyCon _ typ)) e:stmts) = do
+                go (HSE.Generator _ (HSE.PatTypeSig _ (HSE.PVar _ (HSE.Ident _ string)) (typ)) e:stmts) = do
                   utyp <- parseType typ
                   next <- go stmts
                   UBind <$> parseE e <*> pure (ULam string utyp next)
                 go _ = HSE.ParseFailed (HSE.getPointLoc srcLoc) "Invalid do-block."
         parseE expr' = error $ "Can't parse " ++ show expr'
-        parseType (HSE.UnQual _ (HSE.Ident _ "String")) = pure UString
+        parseType (HSE.TyCon _ (HSE.UnQual _ (HSE.Ident _ "String"))) = pure UString
+        parseType (HSE.TyCon _ (HSE.UnQual _ (HSE.Ident _ "Bool"))) = pure UBool
+        parseType (HSE.TyFun _ x y) = UArr <$> parseType x <*> parseType y
+        parseType (HSE.TyParen _ x) = parseType x
         parseType _ = error "Invalid type."

@@ -1,5 +1,10 @@
 do Prim.putStrLn "Hi!"
-   file :: String <- Prim.readFile "test.hell"
-   Prim.putStrLn "World!"
-   Prim.putStrLn file
-   Prim.putStrLn "Woop!"
+   fun :: (Bool -> String) <- Prim.pure (\(x :: Bool) -> "Sup")
+   Prim.putStrLn (fun Prim.True)
+   exists :: Bool <- Prim.doesFileExist "demo.txt"
+   if exists
+      then do file :: String <- Prim.readFile "demo.txt"
+              Prim.putStrLn "File contains: "
+              Prim.putStrLn file
+      else do Prim.writeFile "demo.txt" "Hai!"
+              Prim.putStrLn "Wrote file."
