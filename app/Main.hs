@@ -254,6 +254,7 @@ main = do
   let mode = HSE.defaultParseMode{HSE.extensions=HSE.extensions HSE.defaultParseMode <> [HSE.EnableExtension HSE.ScopedTypeVariables]}
   print $ HSE.parseExpWithMode mode string
   case HSE.parseExpWithMode mode string >>= parseE of
+    HSE.ParseFailed loc err -> putStrLn $ HSE.prettyPrint loc <> ":\n" ++ err
     HSE.ParseOk term -> do
      print term
      case check term Nil of
@@ -275,7 +276,7 @@ main = do
           UApp <$> parseE f <*> parseE x
         parseE (HSE.Lit _ (HSE.String _ string _original)) =
           pure $ UPrim $ PString string
-        parseE (HSE.Do _ stmts) = go stmts
+        parseE (HSE.Do srcLoc stmts) = go stmts
           where go (HSE.Qualifier _ e:stmts) = do
                   if null stmts then parseE e else do
                     next <- go stmts
@@ -284,7 +285,7 @@ main = do
                   utyp <- parseType typ
                   next <- go stmts
                   UBind <$> parseE e <*> pure (ULam string utyp next)
-                go [] = error "Invalid do-block."
+                go _ = HSE.ParseFailed (HSE.getPointLoc srcLoc) "Invalid do-block."
         parseE expr' = error $ "Can't parse " ++ show expr'
         parseType (HSE.UnQual _ (HSE.Ident _ "String")) = pure UString
         parseType _ = error "Invalid type."
