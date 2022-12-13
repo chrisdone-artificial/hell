@@ -1,0 +1,5 @@
+do Prim.putStrLn "Hi!"
+   file :: String <- Prim.readFile "test.hell"
+   Prim.putStrLn "World!"
+   Prim.putStrLn file
+   Prim.putStrLn "Woop!"

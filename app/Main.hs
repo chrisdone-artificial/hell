@@ -42,6 +42,7 @@ data UType
 
 data Prim
   = DoesFileExist
+  | ReadFile
   | WriteFile
   | PString String
   | PBool Bool
@@ -54,6 +55,7 @@ tcPrim PUnit = Typed UnitTy (Prim ())
 tcPrim (PString string) = Typed String (Prim string)
 tcPrim (PBool bool) = Typed Bool (Prim bool)
 tcPrim DoesFileExist = Typed (Arr String (Io Bool)) (Prim doesFileExist)
+tcPrim ReadFile = Typed (Arr String (Io String)) (Prim readFile)
 tcPrim PutStrLn = Typed (Arr String (Io UnitTy)) (Prim putStrLn)
 tcPrim WriteFile = Typed (Arr String (Arr String (Io UnitTy))) (Prim writeFile)
 
@@ -124,7 +126,7 @@ data TyEnv g where
   Cons :: String -> Ty t -> TyEnv h -> TyEnv (h, t)
 
 lookupVar :: String -> TyEnv g -> Typed (Var g)
-lookupVar _ Nil = error "Variable not found"
+lookupVar x Nil = error $ "Variable not found: " ++ show x
 lookupVar v (Cons s ty e)
   | v == s = Typed ty ZVar
   | otherwise = case lookupVar v e of
@@ -249,8 +251,9 @@ main :: IO ()
 main = do
   (filePath:_) <- getArgs
   string <- readFile filePath
-  print $ HSE.parseExp string
-  case HSE.parseExp string >>= parseE of
+  let mode = HSE.defaultParseMode{HSE.extensions=HSE.extensions HSE.defaultParseMode <> [HSE.EnableExtension HSE.ScopedTypeVariables]}
+  print $ HSE.parseExpWithMode mode string
+  case HSE.parseExpWithMode mode string >>= parseE of
     HSE.ParseOk term -> do
      print term
      case check term Nil of
@@ -265,22 +268,23 @@ main = do
             "doesFileExist" -> DoesFileExist
             "writeFile" -> WriteFile
             "putStrLn" -> PutStrLn
+            "readFile" -> ReadFile
         parseE (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ string))) =
           pure $ UVar string
         parseE (HSE.App _ f x) = do
           UApp <$> parseE f <*> parseE x
         parseE (HSE.Lit _ (HSE.String _ string _original)) =
           pure $ UPrim $ PString string
-
-        -- Do-notation requires parsing types so that you can have:
-        -- do x :: String <- readFile "x.txt"
-        --
-        -- parseE (HSE.Do _ stmts) = go stmts
-        --   where go (HSE.Qualifier _ e:stmts) = do
-        --           next <- go stmts
-        --           UBind <$> parseE e <*> fmap (ULam "_" UUnit) next
-        --         go ((HSE.Generator _ (HSE.PVar _ (HSE.Ident _ string)) e):stmts) = do
-        --           next <- go stmts
-        --           UBind <$> parseE e <*> fmap (ULam string UUnit) next
-
+        parseE (HSE.Do _ stmts) = go stmts
+          where go (HSE.Qualifier _ e:stmts) = do
+                  if null stmts then parseE e else do
+                    next <- go stmts
+                    UBind <$> parseE e <*> pure (ULam "_" UUnit next)
+                go (HSE.Generator _ (HSE.PatTypeSig _ (HSE.PVar _ (HSE.Ident _ string)) (HSE.TyCon _ typ)) e:stmts) = do
+                  utyp <- parseType typ
+                  next <- go stmts
+                  UBind <$> parseE e <*> pure (ULam string utyp next)
+                go [] = error "Invalid do-block."
         parseE expr' = error $ "Can't parse " ++ show expr'
+        parseType (HSE.UnQual _ (HSE.Ident _ "String")) = pure UString
+        parseType _ = error "Invalid type."
